@@ -1,4 +1,5 @@
 import re
+import os
 import string
 import numpy as np
 import nltk
@@ -38,6 +39,12 @@ retweet_prefix = "RT "
 user_name_string = "USERNAME"
 hashtag_string = "HASHTAG"
 link_string = "LINK"
+
+user_name_re = "@\w{1,15}"
+link_re = "(?:http:|https:)?//t.co/\w*"
+hashtag_re = "#\w*"
+repeated_punkt_re = "(?:\?|!){2,}"
+
 
 class MisogynousCategory(Enum):
     dominance = 1
@@ -99,15 +106,15 @@ def isRetweet(string):
 
 
 def replace_username(string):
-    return re.sub('@\w{1,15}', user_name_string, string)
+    return re.sub(user_name_re, user_name_string, string)
 
 
 def replace_hashtag(string):
-    return re.sub('#\w*', hashtag_string, string)
+    return re.sub(hashtag_re, hashtag_string, string)
 
 
 def replace_link(string):
-    return re.sub('(?:http:|https:)?//t.co/\w*', link_string, string)
+    return re.sub(link_re, link_string, string)
 
 
 def preprocessed_tweet(text):
@@ -267,19 +274,33 @@ def punctuation_marks_count(text):
     return features
 
 
+def number_of_capital_letters(text):
+    return
+
+
+def number_of_repeated_punctuation(text):
+    return sum(1 for char in text if char.isupper())
+
+
 def extract_features(tweet):
+    # For some features text without pre-processing is used, e.g. number of punctuation marks
+    # Tokens are extracted from a pre-processed tweet
     preprocessed_text = bow_preprocessed_tweet(tweet.text)
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
     tokens = tokenizer.tokenize(preprocessed_text)
 
-    number_of_user_names = len(re.findall("@\w{1,15}", tweet.text))
-    number_of_links = len(re.findall("(?:http:|https:)?//t.co/\w*", tweet.text))
+    number_of_user_names = len(re.findall(user_name_re, tweet.text))
+    number_of_links = len(re.findall(link_re, tweet.text))
+    number_of_capital_letters = sum(1 for char in tweet.text if char.isupper())
+    number_of_repeated_punctuation = len(re.findall(repeated_punkt_re, tweet.text))
 
     features = {"number_of_user_names": number_of_user_names,
                 "number_of_links": number_of_links,
                 "tweet_len": len(tweet.text),
                 "adjectives_frequency": adjectives_frequency(tokens),
-                "verbs_frequency": verbs_frequency(tokens)}
+                "verbs_frequency": verbs_frequency(tokens),
+                "capital_letters_number": number_of_capital_letters,
+                "repeated_punctuation_number": number_of_repeated_punctuation}
     features.update(punctuation_marks_count(tweet.text))
     # hashtags occurences
     features.update(extract_hashtags(tweet.text))
@@ -303,6 +324,32 @@ def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5):
     return clusters
 
 
+def create_dir(path):
+    try:
+        os.mkdir(path)
+    except OSError:
+        print("Creation of the directory %s failed" % path)
+
+
+# Check if K means with 5 centroids produce similar clusters
+def save_clustering_results(clusters, folder):
+    create_dir(folder)
+    file_name = "Cluster {}"
+
+    for index, cluster in enumerate(clusters):
+        cluster_file_name = file_name.format(index)
+        cluster_file_path = os.path.join(folder, cluster_file_name)
+        with open(cluster_file_path, 'w') as file:
+            file.write("Number of tweets {} \n".format(len(cluster)))
+            file.write("Dominance: {} \n".format(len([x for x in cluster if x.category == MisogynousCategory.dominance])))
+            file.write("Sexual Harassment: {} \n".format(len([x for x in cluster if x.category == MisogynousCategory.sexual_harassment])))
+            file.write("Derailing: {} \n".format(len([x for x in cluster if x.category == MisogynousCategory.derailing])))
+            file.write("Discredit: {} \n".format(len([x for x in cluster if x.category == MisogynousCategory.discredit])))
+            file.write("Stereotype: {} \n".format(len([x for x in cluster if x.category == MisogynousCategory.stereotype])))
+            for tweet in cluster:
+                file.write(tweet.text + "\t" + tweet.category.name + "\n")
+
+
 # To create word clouds
 def word_distr(category_tweets):
     word_dist = FreqDist()
@@ -316,7 +363,7 @@ def word_distr(category_tweets):
 
 
 def word_distr_to_file(word_dist, file_name):
-    file = "results/" + file_name +".txt"
+    file = "results word occurences/" + file_name +".txt"
     with open(file, "w") as filehandle:
         filehandle.writelines("{} {}\n".format(word, count) for (word, count) in word_dist)
 
@@ -345,21 +392,20 @@ def main():
     stop_words.add("u")
     print(len(misogyny_tweets))
 
-    hasher = FeatureHasher()
-    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
-
     individual_features = list(map(extract_features, misogyny_tweets))
 
+    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
     word_ngrams = [extract_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[1, 2, 3])
                    for tweet in misogyny_tweets]
 
-    char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text), stemming=False), n_list=[3, 4, 5])
+    char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text, stemming=False)), n_list=[3, 4, 5])
                    for tweet in misogyny_tweets]
 
     # do not use POS tags because they shown low performance for short texts like tweets
     #pos_tags_ngrams = [extract_pos_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[1, 2, 3])
      #              for tweet in misogyny_tweets]
 
+    hasher = FeatureHasher()
     ngrams = [];
     for index, dict1 in enumerate(individual_features):
         curr_dict = dict1.copy()
@@ -375,8 +421,8 @@ def main():
 
     #print(hasher.get_feature_names()[1:100])
 
-    labels = perform_k_means_clustering(X_features, misogyny_tweets)
-
+    clusters = perform_k_means_clustering(X_features, misogyny_tweets)
+    save_clustering_results(clusters, "results")
 
     # categories analysis
     if False:
@@ -400,9 +446,6 @@ def main():
         stereotype_distr = word_distr(tweet_by_category(tweets, MisogynousCategory.stereotype))
         plot_word_dist_as_cloud(stereotype_distr, MisogynousCategory.stereotype.name)
         word_distr_to_file(stereotype_distr.most_common(25), MisogynousCategory.stereotype.name)
-
-
-
 
 
 if __name__ == '__main__':
