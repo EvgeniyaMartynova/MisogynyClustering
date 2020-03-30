@@ -17,6 +17,10 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction import FeatureHasher, DictVectorizer
 from nltk.util import ngrams
+from gensim.models import Word2Vec
+from gensim.test.utils import datapath
+from gensim.models import KeyedVectors
+from nltk.stem import PorterStemmer
 from sklearn.feature_extraction.text import CountVectorizer
 
 # Download the 'stopwords' and 'punkt' from the Natural Language Toolkit, you can comment the next lines if already present.
@@ -25,7 +29,10 @@ from sklearn.feature_extraction.text import CountVectorizer
 # nltk.download('tagsets')
 # nltk.download('averaged_perceptron_tagger')
 
+
+porter = PorterStemmer()
 stop_words = set(stopwords.words('english'))
+word2vec_model = KeyedVectors.load_word2vec_format("word2vec_twitter_tokens.bin", binary=True, unicode_errors="ignore")
 
 retweet_prefix = "RT "
 user_name_string = "USERNAME"
@@ -114,17 +121,29 @@ def preprocessed_tweet(text):
     return text
 
 
-def bow_preprocessed_tweet(text):
+def bow_preprocessed_tweet(text, stemming=True):
     if isRetweet(text):
         text = text[len(retweet_prefix)-1:]
 
-    text_nopunct = "".join([char.lower() for char in text if not is_punctuation(char)])
-    text_no_doublespace = re.sub('\s+', ' ', text_nopunct).strip()
-    #text = replace_username(text)
-    #text = replace_hashtag(text)
-    #text = replace_link(text)
+    text = "".join([char.lower() for char in text if not is_punctuation(char)])
+    text = re.sub('\s+', ' ', text).strip()
+    text = replace_username(text)
+    text = replace_hashtag(text)
+    text = replace_link(text)
 
-    return text_no_doublespace
+    if stemming:
+        text = stemmed_text(text)
+
+    return text
+
+
+def stemmed_text(text):
+    tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
+    tokens = tokenizer.tokenize(text)
+    stem_sentence = []
+    for word in tokens:
+        stem_sentence.append(porter.stem(word))
+    return " ".join(stem_sentence)
 
 
 def has_link(text):
@@ -164,8 +183,8 @@ def extract_ngrams(tokens, n_list):
 
 def extract_char_ngrams(tokens, n_list):
     cleaned_counter = Counter()
-    cleaned_tokens = [x for x in tokens if x not in stop_words and not is_punctuation(x)]
-    text = " ".join(cleaned_tokens)
+    # cleaned_tokens = [x for x in tokens if x not in stop_words]
+    text = " ".join(tokens)
 
     for n in n_list:
         grams = list(ngrams(text, n))
@@ -186,6 +205,27 @@ def extract_pos_ngrams(tokens, n_list):
             cleaned_counter[" ".join(pos_tuple)] += 1
 
     return dict(cleaned_counter)
+
+
+def extract_averaged_embeddings(tokens, word2vec_model):
+    vectors = []
+    for token in tokens:
+        try:
+            vector = word2vec_model[token]
+            vectors.append(vector)
+        except KeyError:
+            pass
+            #print("The word {} does not appear in this model".format(token))
+
+    dict = {}
+    if len(vectors) > 0:
+        averaged_vector = np.average(vectors, axis=0)
+        for index, item in np.ndenumerate(averaged_vector):
+            # indexes are represented as tuples (x,), extract x
+            key = "vec"+str(index[0])
+            dict[key] = item
+
+    return dict
 
 
 def adjectives_frequency(tokens):
@@ -212,10 +252,6 @@ def verbs_frequency(tokens):
     return adj_frequencies
 
 
-def extract_embeddings():
-    return []
-
-
 def extract_hashtags(text):
     hashtags = re.findall('#\w*', text)
     return dict(Counter(hashtags))
@@ -224,17 +260,17 @@ def extract_hashtags(text):
 def punctuation_marks_count(text):
     punctuation_marks = ",.?!:;'\""
 
-    features = []
+    features = {}
     for punctuation_mark in punctuation_marks:
-        features.append(text.count(punctuation_mark))
+        features[punctuation_mark] = text.count(punctuation_mark)
 
     return features
 
 
 def extract_features(tweet):
+    preprocessed_text = bow_preprocessed_tweet(tweet.text)
     tokenizer = TweetTokenizer(preserve_case=False, reduce_len=True, strip_handles=True)
-    tokens = tokenizer.tokenize(tweet.text)
-    tokens = [x for x in tokens if x not in stop_words and not is_punctuation(x)]
+    tokens = tokenizer.tokenize(preprocessed_text)
 
     number_of_user_names = len(re.findall("@\w{1,15}", tweet.text))
     number_of_links = len(re.findall("(?:http:|https:)?//t.co/\w*", tweet.text))
@@ -243,9 +279,11 @@ def extract_features(tweet):
                 "number_of_links": number_of_links,
                 "tweet_len": len(tweet.text),
                 "adjectives_frequency": adjectives_frequency(tokens),
-                "verbs_frequency": verbs_frequency(tokens),
-                "punctuation_marks": punctuation_marks_count(tweet.text)}
+                "verbs_frequency": verbs_frequency(tokens)}
+    features.update(punctuation_marks_count(tweet.text))
+    # hashtags occurences
     features.update(extract_hashtags(tweet.text))
+    features.update(extract_averaged_embeddings(tokens, word2vec_model))
 
     return features
 
@@ -265,6 +303,7 @@ def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5):
     return clusters
 
 
+# To create word clouds
 def word_distr(category_tweets):
     word_dist = FreqDist()
     for tweet in category_tweets:
@@ -314,12 +353,12 @@ def main():
     word_ngrams = [extract_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[1, 2, 3])
                    for tweet in misogyny_tweets]
 
-    char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[3, 4, 5])
+    char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text), stemming=False), n_list=[3, 4, 5])
                    for tweet in misogyny_tweets]
 
-    pos_tags_ngrams = [extract_pos_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[1, 2, 3])
-                   for tweet in misogyny_tweets]
-
+    # do not use POS tags because they shown low performance for short texts like tweets
+    #pos_tags_ngrams = [extract_pos_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=[1, 2, 3])
+     #              for tweet in misogyny_tweets]
 
     ngrams = [];
     for index, dict1 in enumerate(individual_features):
@@ -328,14 +367,11 @@ def main():
         curr_dict.update(d1)
         d2 = char_ngrams[index]
         curr_dict.update(d2)
-        d3 = pos_tags_ngrams[index]
-        curr_dict.update(d3)
+        #d3 = pos_tags_ngrams[index]
+        #curr_dict.update(d3)
         ngrams.append(curr_dict)
 
     X_features = hasher.fit_transform(ngrams)
-
-    #trigram_vectorizer = CountVectorizer(ngram_range=(1, 3), token_pattern=r'\b\w+\b', min_df=1)
-    #X_2 = trigram_vectorizer.fit_transform([x.text for x in misogyny_tweets]).toarray()
 
     #print(hasher.get_feature_names()[1:100])
 
