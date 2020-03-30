@@ -334,7 +334,7 @@ def create_dir(path):
 # Check if K means with 5 centroids produce similar clusters
 def save_clustering_results(clusters, folder):
     create_dir(folder)
-    file_name = "Cluster {}"
+    file_name = "Cluster {}.txt"
 
     for index, cluster in enumerate(clusters):
         cluster_file_name = file_name.format(index)
