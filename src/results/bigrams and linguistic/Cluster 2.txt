@@ -1,9 +1,9 @@
 Number of tweets 719 
-Dominance: 82 
-Sexual Harassment: 115 
-Derailing: 28 
-Discredit: 391 
-Stereotype: 103 
+Dominance: 82, share 0.11404728789986092 
+Sexual Harassment: 115, share 0.1599443671766342 
+Derailing: 28, share 0.03894297635605007 
+Discredit: 391, share 0.5438108484005564 
+Stereotype: 103, share 0.14325452016689846 
  @bnixole: bitch shut the fuck up you're fucking your best friends dad https://t.co/1YR6ydZMgc	dominance
 Selena has BEEN acting like she'ss the victim all these years, shut the fuck up https://t.co/tawvofiPgJ	derailing
 like damn bitch if youre hungry shut the fuck up and eat im trying to sleep!!!	dominance

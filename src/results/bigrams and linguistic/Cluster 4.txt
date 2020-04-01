@@ -1,9 +1,9 @@
 Number of tweets 623 
-Dominance: 76 
-Sexual Harassment: 115 
-Derailing: 11 
-Discredit: 348 
-Stereotype: 73 
+Dominance: 76, share 0.12199036918138041 
+Sexual Harassment: 115, share 0.18459069020866772 
+Derailing: 11, share 0.01765650080256822 
+Discredit: 348, share 0.5585874799357945 
+Stereotype: 73, share 0.11717495987158909 
 @emmasharp003 @Ldrake48Lee Bitch shut the fuck up	dominance
 @abzdafab Dear cunt, please shut the fuck up.	dominance
  @queenofdragonsb: Pls shut the fuck up bitch	dominance

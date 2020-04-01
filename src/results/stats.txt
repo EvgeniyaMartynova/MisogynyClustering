@@ -1,0 +1,6 @@
+Tweets number 2245
+Dominance: 272, share 0.12115812917594655
+Sexual Harassment: 396, share 0.17639198218262805
+Derailing: 103, share 0.045879732739420934
+Discredit: 1155, share 0.5144766146993318
+Stereotype: 319, share 0.14209354120267262
