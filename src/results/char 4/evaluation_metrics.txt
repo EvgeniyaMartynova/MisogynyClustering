@@ -1,0 +1,3 @@
+Silhouette score: 0.044453022704783414 
+Calinski harabaz score: 20.712882799836844 
+Davies bouldin score: 5.642034074758044 

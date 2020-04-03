@@ -1,6 +1,8 @@
 import re
 import os
 import string
+from typing import Set, Any
+
 import numpy as np
 import nltk
 from collections import Counter
@@ -15,7 +17,7 @@ from enum import Enum
 from nltk.probability import MLEProbDist
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, SpectralClustering
 from sklearn.feature_extraction import FeatureHasher, DictVectorizer
 from nltk.util import ngrams
 from emoji import UNICODE_EMOJI
@@ -23,6 +25,7 @@ from gensim.models import Word2Vec
 from gensim.test.utils import datapath
 from gensim.models import KeyedVectors
 from sklearn.feature_extraction.text import CountVectorizer
+import utils
 
 # Download the 'stopwords' and 'punkt' from the Natural Language Toolkit, you can comment the next lines if already present.
 # nltk.download('stopwords')
@@ -31,7 +34,7 @@ from sklearn.feature_extraction.text import CountVectorizer
 # nltk.download('averaged_perceptron_tagger')
 
 
-stop_words = set(stopwords.words('english'))
+stop_words: Set[Any] = set(stopwords.words('english'))
 tokenizer = TweetTokenizer(preserve_case=False, reduce_len=False, strip_handles=True)
 
 retweet_prefix = "RT "
@@ -103,7 +106,6 @@ def load_tweets(path):
             tweet = Tweet(components[0], preprocessed_text, misogynous, MisogynousCategory[components[3]] if misogynous else MisogynousCategory.no, components[4] == "active")
             tweets.append(tweet)
 
-    assert len(tweets) == 5000
     return tweets
 
 
@@ -215,7 +217,7 @@ def extract_ngrams(tokens, n_list, words_to_exclude):
 
         for word_tuple in grams:
             for word in word_tuple:
-                if word not in stop_words and word not in words_to_exclude:
+                if word not in words_to_exclude:
                     cleaned_counter[" ".join(word_tuple)] += 1
                     break
 
@@ -256,7 +258,6 @@ def extract_averaged_embeddings(tokens, word2vec):
             vectors.append(vector)
         except KeyError:
             pass
-            #print("The word {} does not appear in this model".format(token))
 
     dict = {}
     if len(vectors) > 0:
@@ -314,47 +315,71 @@ def extract_features(tweet, word2vec=None):
     preprocessed_text = bow_preprocessed_tweet(tweet.text)
     tokens = tokenizer.tokenize(preprocessed_text)
 
-    number_of_user_names = len(re.findall(user_name_re, tweet.text))
-    number_of_links = len(re.findall(link_re, tweet.text))
-    number_of_capital_letters = sum(1 for char in tweet.text if char.isupper())
     number_of_repeated_punctuation = len(re.findall(repeated_punkt_re, tweet.text))
+    number_of_links = len(re.findall(link_re, tweet.text))
     number_of_emojis = sum(1 for token in tokens if is_emoji(token))
     number_of_word_lengthening = len(re.findall(lenghtening_re, tweet.text))
 
-    features = {"number_of_user_names": number_of_user_names,
-                "number_of_links": number_of_links,
-                "tweet_len": len(tweet.text),
+    features = {#"number_of_links": number_of_links,
                 "adjectives_frequency": adjectives_frequency(tokens),
-                "verbs_frequency": verbs_frequency(tokens),
-                "capital_letters_number": number_of_capital_letters,
-                "repeated_punctuation_number": number_of_repeated_punctuation,
-                "number_of_emojis": number_of_emojis,
-                "number_of_word_lengthening": number_of_word_lengthening}
-    features.update(punctuation_marks_count(tweet.text))
+                "verbs_frequency": verbs_frequency(tokens)}
+                #"number_of_emojis": number_of_emojis,
+                #"repeated_punctuation_number": number_of_repeated_punctuation,
+                #"number_of_word_lengthening": number_of_word_lengthening}
     # hashtags occurences
-    features.update(extract_hashtags(tweet.text))
+    #features.update(extract_hashtags(tweet.text))
+
+    #features = {}
     if word2vec is not None:
+        # remove punctuation marks, emojis, username, token, hashtag
+        tokens = [x for x in tokens if not is_punctuation(x) and x not in stop_words]
         features.update(extract_averaged_embeddings(tokens, word2vec))
 
     return features
 
 
-def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5):
+def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5, k_means=True):
     #feature_vectors = list(map(extract_features, tweets))
-    y_kmeans = KMeans(n_clusters=n_clusters,random_state=42).fit_predict(feature_vectors)
+    if k_means:
+        labels = KMeans(n_clusters=n_clusters,random_state=42).fit_predict(feature_vectors)
+    else:
+        labels = SpectralClustering(n_clusters=n_clusters, eigen_solver='arpack',
+        affinity="nearest_neighbors", assign_labels="kmeans", random_state=42).fit_predict(feature_vectors)
+
     clusters = []
-    for cluster_index in np.unique(y_kmeans):
+    for cluster_index in np.unique(labels):
         current_cluster = []
-        for index, value in enumerate(y_kmeans):
+        for index, value in enumerate(labels):
             if value == cluster_index:
                 current_cluster.append(tweets[index])
         clusters.append(current_cluster)
 
-    return clusters
+    return clusters, labels
+
+
+def find_k(feature_vectors):
+    # calculate distortion for a range of number of cluster
+    distortions = []
+    for i in range(1, 11):
+        km = KMeans(n_clusters=i, random_state=42)
+        km.fit(feature_vectors)
+        distortions.append(km.inertia_)
+
+    # plot
+    plt.plot(range(1, 11), distortions, marker='o')
+    plt.xlabel('Number of clusters')
+    plt.ylabel('Distortion')
+    plt.show()
 
 
 # Check if K means with 5 centroids produce similar clusters
-def save_clustering_results(clusters, folder):
+def save_clustering_results(clusters, metrics, folder):
+    matrics_file_path = os.path.join(folder, "evaluation_metrics.txt")
+    with open(matrics_file_path, 'w') as file:
+        file.write("Silhouette score: {} \n".format(metrics["silhouette_score"]))
+        file.write("Calinski harabaz score: {} \n".format(metrics["calinski_harabaz_score"]))
+        file.write("Davies bouldin score: {} \n".format(metrics["davies_bouldin_score"]))
+
     file_name = "Cluster {}.txt"
 
     for index, cluster in enumerate(clusters):
@@ -375,6 +400,65 @@ def save_clustering_results(clusters, folder):
             file.write("Stereotype: {}, share {} \n".format(stereotype_num, stereotype_num/tweets_num))
             for tweet in cluster:
                 file.write(tweet.text + "\t" + tweet.category.name + "\n")
+
+
+# word embeddings + linguistic features
+def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
+    individual_features = []
+    word2vec = Word2vec() if use_embeddings else None
+    for tweet in tweets:
+        tweet_features = extract_features(tweet, word2vec)
+        individual_features.append(tweet_features)
+
+    word_ngrams = None
+    if len(word_ngrams_list) > 0:
+        word_ngrams = [extract_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), word_ngrams_list, words_to_exclude)
+                       for tweet in tweets]
+
+    char_ngrams = None
+    if len(char_ngrams_list) > 0:
+        char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=char_ngrams_list)
+                       for tweet in tweets]
+
+    features = []
+    for index, dict in enumerate(individual_features):
+        curr_dict = dict.copy()
+
+        if word_ngrams is not None:
+            word_ngrams_dict = word_ngrams[index]
+            curr_dict.update(word_ngrams_dict)
+
+        if char_ngrams is not None:
+            char_ngrams_dict = char_ngrams[index]
+            curr_dict.update(char_ngrams_dict)
+
+        features.append(curr_dict)
+
+    hasher = DictVectorizer()
+    X_features = hasher.fit_transform(features)
+    #find_k(X_features)
+    clusters, labels = perform_k_means_clustering(X_features, tweets)
+    metrics = utils.internalValidation(X_features.toarray(), labels)
+    create_dir(output_folder)
+    save_clustering_results(clusters, metrics, output_folder)
+
+
+def misogynyous_tweets_stats(tweets):
+    tweets_count = len(tweets)
+    print("Tweets number {}".format(tweets_count))
+    for category in MisogynousCategory:
+        if category is not MisogynousCategory.no:
+            category_count = len(tweet_by_category(tweets, category))
+            print("{} number {}, share {}".format(category.name, category_count, category_count/tweets_count))
+
+
+def dataset_categories_analysis(tweets, plot=False):
+    for category in MisogynousCategory:
+        if category is not MisogynousCategory.no:
+            category_distr = word_distr(tweet_by_category(tweets, category))
+            if plot:
+                plot_word_dist_as_cloud(category_distr, category.name)
+            word_distr_to_file(category_distr.most_common(25), category.name)
 
 
 # To create word clouds
@@ -412,72 +496,25 @@ def plot_word_dist_as_cloud(word_dist, file_name=None, plot=False):
         plt.show()
 
 
-def dataset_categories_analysis(tweets, plot=False):
-    for category in MisogynousCategory:
-        if category is not MisogynousCategory.no:
-            category_distr = word_distr(tweet_by_category(tweets, category))
-            if plot:
-                plot_word_dist_as_cloud(category_distr, category.name)
-            word_distr_to_file(category_distr.most_common(25), category.name)
-
-
-# word embeddings + linguistic features
-def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
-    individual_features = []
-    word2vec = Word2vec() if use_embeddings else None
-    for tweet in tweets:
-        tweet_features = extract_features(tweet, word2vec)
-        individual_features.append(tweet_features)
-
-    word_ngrams = None
-    if len(ngrams) > 0:
-        word_ngrams = [extract_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), word_ngrams_list, words_to_exclude)
-                       for tweet in tweets]
-
-    char_ngrams = None
-    if len(char_ngrams) > 0:
-        char_ngrams = [extract_char_ngrams(tokenizer.tokenize(bow_preprocessed_tweet(tweet.text)), n_list=char_ngrams_list)
-                       for tweet in tweets]
-
-    features = []
-    for index, dict in enumerate(individual_features):
-        curr_dict = dict.copy()
-
-        if word_ngrams is not None:
-            word_ngrams_dict = word_ngrams[index]
-            curr_dict.update(word_ngrams_dict)
-
-        if char_ngrams is not None:
-            char_ngrams_dict = char_ngrams[index]
-            curr_dict.update(char_ngrams_dict)
-
-        features.append(curr_dict)
-
-    hasher = FeatureHasher()
-    X_features = hasher.fit_transform(features)
-    clusters = perform_k_means_clustering(X_features, tweets)
-    create_dir(output_folder)
-    save_clustering_results(clusters, output_folder)
-
-
-def misogynyous_tweets_stats(tweets):
-    tweets_count = len(tweets)
-    print("Tweets number {}".format(tweets_count))
-    for category in MisogynousCategory:
-        if category is not MisogynousCategory.no:
-            category_count = len(tweet_by_category(tweets, category))
-            print("{} number {}, share {}".format(category.name, category_count, category_count/tweets_count))
-
 def main():
     stop_words.add("u")
     stop_words.add("link")
     stop_words.add("username")
     stop_words.add("hashtag")
+    stop_words.add("bitch")
     tweets = load_tweets("data/tweets.tsv")
     misogyny_tweets = misogyny_only_tweets(tweets)
+    print(len(misogyny_tweets))
 
-    #words_to_exclude = rare_words(collection_vocabulary(misogyny_tweets), threshold=1)
-    clustering(misogyny_tweets, "results/next")
+    rare_words_array = rare_words(collection_vocabulary(misogyny_tweets), threshold=3)
+    words_to_exclude = stop_words.union(set(rare_words_array))
+
+    clustering(misogyny_tweets,
+               "results/embeddings + unigrams + char 3,4 + adj + verbs",
+               word_ngrams_list=[1],
+               char_ngrams_list=[3,4],
+               use_embeddings=True,
+               words_to_exclude=words_to_exclude)
 
 
 
