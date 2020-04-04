@@ -6,10 +6,7 @@ from typing import Set, Any
 import numpy as np
 import nltk
 from collections import Counter
-import sklearn.datasets
 import sklearn.metrics
-import sklearn.model_selection
-from nltk import ngrams
 from nltk.corpus import stopwords
 from nltk import download, FreqDist
 from nltk.tokenize import TweetTokenizer
@@ -17,14 +14,11 @@ from enum import Enum
 from nltk.probability import MLEProbDist
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans, SpectralClustering
+from sklearn.cluster import KMeans
 from sklearn.feature_extraction import FeatureHasher, DictVectorizer
 from nltk.util import ngrams
 from emoji import UNICODE_EMOJI
-from gensim.models import Word2Vec
-from gensim.test.utils import datapath
 from gensim.models import KeyedVectors
-from sklearn.feature_extraction.text import CountVectorizer
 import utils
 
 # Download the 'stopwords' and 'punkt' from the Natural Language Toolkit, you can comment the next lines if already present.
@@ -338,13 +332,9 @@ def extract_features(tweet, word2vec=None):
     return features
 
 
-def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5, k_means=True):
+def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5):
     #feature_vectors = list(map(extract_features, tweets))
-    if k_means:
-        labels = KMeans(n_clusters=n_clusters,random_state=42).fit_predict(feature_vectors)
-    else:
-        labels = SpectralClustering(n_clusters=n_clusters, eigen_solver='arpack',
-        affinity="nearest_neighbors", assign_labels="kmeans", random_state=42).fit_predict(feature_vectors)
+    labels = KMeans(n_clusters=n_clusters, random_state=42).fit_predict(feature_vectors)
 
     clusters = []
     for cluster_index in np.unique(labels):
@@ -355,21 +345,6 @@ def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5, k_means=Tr
         clusters.append(current_cluster)
 
     return clusters, labels
-
-
-def find_k(feature_vectors):
-    # calculate distortion for a range of number of cluster
-    distortions = []
-    for i in range(1, 11):
-        km = KMeans(n_clusters=i, random_state=42)
-        km.fit(feature_vectors)
-        distortions.append(km.inertia_)
-
-    # plot
-    plt.plot(range(1, 11), distortions, marker='o')
-    plt.xlabel('Number of clusters')
-    plt.ylabel('Distortion')
-    plt.show()
 
 
 # Check if K means with 5 centroids produce similar clusters
@@ -402,8 +377,9 @@ def save_clustering_results(clusters, metrics, folder):
                 file.write(tweet.text + "\t" + tweet.category.name + "\n")
 
 
+
 # word embeddings + linguistic features
-def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
+def get_features(tweets, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
     individual_features = []
     word2vec = Word2vec() if use_embeddings else None
     for tweet in tweets:
@@ -436,11 +412,49 @@ def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4
 
     hasher = DictVectorizer()
     X_features = hasher.fit_transform(features)
-    #find_k(X_features)
-    clusters, labels = perform_k_means_clustering(X_features, tweets)
-    metrics = utils.internalValidation(X_features.toarray(), labels)
+    return X_features
+
+
+# word embeddings + linguistic features
+def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
+    features = get_features(tweets, word_ngrams_list, char_ngrams_list, use_embeddings, words_to_exclude)
+    clusters, labels = perform_k_means_clustering(features, tweets)
+    metrics = utils.internalValidation(features.toarray(), labels)
     create_dir(output_folder)
     save_clustering_results(clusters, metrics, output_folder)
+
+
+def find_k(tweets, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
+    features = get_features(tweets, word_ngrams_list, char_ngrams_list, use_embeddings, words_to_exclude)
+    # calculate distortion for a range of number of cluster
+    distortions = []
+    silhouette_scores = []
+    calinski_harabaz_scores = []
+    davies_bouldin_scores = []
+    ks = range(2, 11)
+    for i in ks:
+        print("K = {}".format(i))
+        km = KMeans(n_clusters=i, random_state=42)
+        labels = km.fit_predict(features)
+        distortions.append(km.inertia_)
+        metrics = utils.internalValidation(features.toarray(), labels)
+        silhouette_scores.append(metrics["silhouette_score"])
+        calinski_harabaz_scores.append(metrics["calinski_harabaz_score"])
+        davies_bouldin_scores.append(metrics["davies_bouldin_score"])
+
+    fig, axs = plt.subplots(2, 2)
+    # plot
+    axs[0, 0].plot(ks, distortions, marker='o')
+    axs[0, 0].set_title('SSE')
+    axs[0, 1].plot(ks, silhouette_scores, marker='^')
+    axs[0, 1].set_title('Silhouette Scores')
+    axs[1, 0].plot(ks, calinski_harabaz_scores, marker='<')
+    axs[1, 0].set_title('Calinski Harabaz Scores')
+    axs[1, 1].plot(ks, davies_bouldin_scores, marker='>')
+    axs[1, 1].set_title('Davies Bouldin Scores')
+
+    plt.subplots_adjust(hspace=0.5, wspace=0.5)
+    plt.show()
 
 
 def misogynyous_tweets_stats(tweets):
@@ -506,15 +520,26 @@ def main():
     misogyny_tweets = misogyny_only_tweets(tweets)
     print(len(misogyny_tweets))
 
+    #discredit = tweet_by_category(misogyny_tweets, MisogynousCategory.discredit)
+
     rare_words_array = rare_words(collection_vocabulary(misogyny_tweets), threshold=3)
     words_to_exclude = stop_words.union(set(rare_words_array))
 
+    # elbow method discredit category
+    find_k(misogyny_tweets,
+           word_ngrams_list=[1],
+           char_ngrams_list=[3,4],
+           use_embeddings=True,
+           words_to_exclude=words_to_exclude)
+
+    """
     clustering(misogyny_tweets,
                "results/embeddings + unigrams + char 3,4 + adj + verbs",
                word_ngrams_list=[1],
                char_ngrams_list=[3,4],
                use_embeddings=True,
                words_to_exclude=words_to_exclude)
+    """
 
 
 
