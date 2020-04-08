@@ -6,7 +6,6 @@ from typing import Set, Any
 import numpy as np
 import nltk
 from collections import Counter
-import sklearn.metrics
 from nltk.corpus import stopwords
 from nltk import download, FreqDist
 from nltk.tokenize import TweetTokenizer
@@ -305,26 +304,12 @@ def punctuation_marks_count(text):
 
 
 def extract_features(tweet, word2vec=None):
-    # For some features text without pre-processing is used, e.g. number of punctuation marks
-    # Tokens are extracted from a pre-processed tweet
     preprocessed_text = bow_preprocessed_tweet(tweet.text)
     tokens = tokenizer.tokenize(preprocessed_text)
 
-    number_of_repeated_punctuation = len(re.findall(repeated_punkt_re, tweet.text))
-    number_of_links = len(re.findall(link_re, tweet.text))
-    number_of_emojis = sum(1 for token in tokens if is_emoji(token))
-    number_of_word_lengthening = len(re.findall(lenghtening_re, tweet.text))
-
-    features = {#"number_of_links": number_of_links,
-                "adjectives_frequency": adjectives_frequency(tokens),
+    features = {"adjectives_frequency": adjectives_frequency(tokens),
                 "verbs_frequency": verbs_frequency(tokens)}
-                #"number_of_emojis": number_of_emojis,
-                #"repeated_punctuation_number": number_of_repeated_punctuation,
-                #"number_of_word_lengthening": number_of_word_lengthening}
-    # hashtags occurences
-    #features.update(extract_hashtags(tweet.text))
 
-    #features = {}
     if word2vec is not None:
         # remove punctuation marks, emojis, username, token, hashtag
         tokens = [x for x in tokens if not is_punctuation(x) and x not in stop_words]
