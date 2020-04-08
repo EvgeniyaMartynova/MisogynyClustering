@@ -20,6 +20,7 @@ from nltk.util import ngrams
 from emoji import UNICODE_EMOJI
 from gensim.models import KeyedVectors
 import utils
+import random
 
 # Download the 'stopwords' and 'punkt' from the Natural Language Toolkit, you can comment the next lines if already present.
 # nltk.download('stopwords')
@@ -333,7 +334,6 @@ def extract_features(tweet, word2vec=None):
 
 
 def perform_k_means_clustering(feature_vectors, tweets, n_clusters=5):
-    #feature_vectors = list(map(extract_features, tweets))
     labels = KMeans(n_clusters=n_clusters, random_state=42).fit_predict(feature_vectors)
 
     clusters = []
@@ -355,10 +355,12 @@ def save_clustering_results(clusters, metrics, folder):
         file.write("Calinski harabaz score: {} \n".format(metrics["calinski_harabaz_score"]))
         file.write("Davies bouldin score: {} \n".format(metrics["davies_bouldin_score"]))
 
-    file_name = "Cluster {}.txt"
+    file_name_cluster = "Cluster {}.txt"
+    file_name_sample = "Sample {}.txt"
 
     for index, cluster in enumerate(clusters):
-        cluster_file_name = file_name.format(index+1)
+        # save the whole result
+        cluster_file_name = file_name_cluster.format(index+1)
         cluster_file_path = os.path.join(folder, cluster_file_name)
         with open(cluster_file_path, 'w') as file:
             tweets_num = len(cluster)
@@ -376,6 +378,13 @@ def save_clustering_results(clusters, metrics, folder):
             for tweet in cluster:
                 file.write(tweet.text + "\t" + tweet.category.name + "\n")
 
+        # save sample for investigation
+        sample_file_name = file_name_sample.format(index + 1)
+        sample_file_path = os.path.join(folder, sample_file_name)
+        sample = random.sample(cluster, 50) if len(cluster) > 50 else cluster
+        with open(sample_file_path, 'w') as file:
+            for tweet in sample:
+                file.write(tweet.text + "\n")
 
 
 # word embeddings + linguistic features
@@ -416,9 +425,9 @@ def get_features(tweets, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embe
 
 
 # word embeddings + linguistic features
-def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[]):
+def clustering(tweets, output_folder, word_ngrams_list=[], char_ngrams_list=[3,4,5], use_embeddings=False, words_to_exclude=[], n_clusters = 5):
     features = get_features(tweets, word_ngrams_list, char_ngrams_list, use_embeddings, words_to_exclude)
-    clusters, labels = perform_k_means_clustering(features, tweets)
+    clusters, labels = perform_k_means_clustering(features, tweets, n_clusters=n_clusters)
     metrics = utils.internalValidation(features.toarray(), labels)
     create_dir(output_folder)
     save_clustering_results(clusters, metrics, output_folder)
@@ -520,26 +529,27 @@ def main():
     misogyny_tweets = misogyny_only_tweets(tweets)
     print(len(misogyny_tweets))
 
-    #discredit = tweet_by_category(misogyny_tweets, MisogynousCategory.discredit)
+    discredit = tweet_by_category(misogyny_tweets, MisogynousCategory.discredit)
 
     rare_words_array = rare_words(collection_vocabulary(misogyny_tweets), threshold=3)
     words_to_exclude = stop_words.union(set(rare_words_array))
 
     # elbow method discredit category
+    """
     find_k(misogyny_tweets,
            word_ngrams_list=[1],
            char_ngrams_list=[3,4],
            use_embeddings=True,
            words_to_exclude=words_to_exclude)
-
     """
-    clustering(misogyny_tweets,
-               "results/embeddings + unigrams + char 3,4 + adj + verbs",
+
+    clustering(discredit,
+               "results/6 clusters DISCREDIT",
                word_ngrams_list=[1],
                char_ngrams_list=[3,4],
                use_embeddings=True,
-               words_to_exclude=words_to_exclude)
-    """
+               words_to_exclude=words_to_exclude,
+               n_clusters=6)
 
 
 
