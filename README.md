@@ -13,4 +13,4 @@ Structure:
 - `img` - images with word clouds by category and elbow method results
 - `results word occurences` - text files with 25 most frequent tokens by category excluding stop words
 - `results` - clustering results. Each folder title explains the parameters used for clustering
-- {category}.txt - auxilary files which contain tweets form a denoted category
+- `{category}.txt` - auxilary files which contain tweets form a denoted category
